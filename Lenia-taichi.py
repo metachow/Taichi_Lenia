@@ -6,6 +6,41 @@ from taichi.ui import canvas
 # ti.init(arch=ti.cpu)
 ti.init(arch=ti.cuda)
 
+
+# color map is copy from: https://forum.taichi.graphics/t/vortex-method-demo/775
+class ColorMap:
+    def __init__(self, h, wl, wr, c):
+        self.h = h
+        self.wl = wl
+        self.wr = wr
+        self.c = c
+
+    @ti.func
+    def clamp(self, x):
+        return max(0.0, min(1.0, x))
+
+    @ti.func
+    def map(self, x):
+        w = 0.0
+        if x < self.c:
+            w = self.wl
+        else:
+            w = self.wr
+        return self.clamp((w-abs(self.clamp(x)-self.c))/w*self.h)
+
+
+jetR = ColorMap(1.5, .37, .37, .75)
+jetG = ColorMap(1.5, .37, .37, .5)
+jetB = ColorMap(1.5, .37, .37, .25)
+
+
+@ti.func
+def color_map(c):
+    return ti.Vector([jetR.map(c),
+                      jetG.map(c),
+                      jetB.map(c)])
+
+
 @ti.data_oriented
 class Taichi_Lenia:
     def __init__(self, res, scatter, conv_r, time, miu, sig, kr=1, kb=ti.Vector([1])):
@@ -17,7 +52,7 @@ class Taichi_Lenia:
         self.time = time
         self.dt = 1/self.time
 
-        self.max_conv_r = 40
+        self.max_conv_r = 30
         self.conv_r = conv_r
 
         self.kernel_alpha = 4.0
@@ -29,12 +64,15 @@ class Taichi_Lenia:
         self.grow_sig[None] = sig
 
         self.total = ti.field(ti.f32, ())
+        self.brush = ti.field(ti.f32, ())
+        self.brush[None] = 0.03
 
         self.kernel_beta = ti.field(ti.f32, self.kernel_rank)
         # self.kernel_beta = ti.Vector([1/2, 1, 1/3])
         self.kernel_beta = kb
 
         self.world_old=ti.field(ti.f32, (self.res, self.res))
+        self.world_save=ti.field(ti.f32, (self.res, self.res))
         self.world_new=ti.field(ti.f32, (self.res, self.res))
 
         self.kernel = ti.field(ti.f32, (2*self.max_conv_r, 2*self.max_conv_r))
@@ -48,33 +86,6 @@ class Taichi_Lenia:
     @ti.func
     def clip(self, x, min, max):
         return ti.min(ti.max(x, min), max)
-    
-    
-    @ti.func
-    def get_color(self, v, vmin, vmax):
-        c = ti.Vector([1.0, 1.0, 1.0])
-
-        if v < vmin:
-            v = vmin
-        if v > vmax:
-            v = vmax
-        dv = vmax - vmin
-
-        if v < (vmin + 0.25 * dv):
-            c[0] = 0
-            c[1] = 4 * (v-vmin) / dv
-        elif v < (vmin + 0.5 * dv):
-            c[0] = 0
-            c[2] = 1 + 4 * (vmin + 0.25*dv -v) / dv
-        elif v < (vmin + 0.75*dv):
-            c[0] = 4 * (v - vmin -0.5 * dv) / dv
-            c[2] = 0
-        else:
-            c[1] = 1 + 4 * (vmin + 0.75 * dv - v) / dv
-            c[2] = 0
-
-        return c    
-
     
     @ti.func
     def kernel_core(self, r):
@@ -154,16 +165,32 @@ class Taichi_Lenia:
     def render(self):
         for i, j in ti.ndrange(self.res, self.res):
             for k, l in ti.ndrange(self.scatter, self.scatter):
+                self.pixels[i*self.scatter+k, j*self.scatter+l] = color_map(self.world_old[i, j])
                 # self.pixels[i*self.scatter+k, j*self.scatter+l] = self.get_color(self.world_old[i, j], 0.0, 1.0)
-                self.pixels[i*self.scatter+k, j*self.scatter+l] = ti.Vector([self.world_old[i, j],self.world_old[i, j],self.world_old[i, j]])
+                # self.pixels[i*self.scatter+k, j*self.scatter+l] = ti.Vector([self.world_old[i, j],self.world_old[i, j],self.world_old[i, j]])
 
     @ti.kernel
     def draw(self):
         center = ti.Vector([self.cursor[0], self.cursor[1]])
         for i, j in ti.ndrange(self.res, self.res):
             dis = (ti.Vector([i, j])/self.res-center).norm()
-            if dis < 0.03:
-                self.world_old[i,j]+= self.clip(ti.random(), 0.2, 0.9)
+            if dis < self.brush[None]:
+                self.world_old[i,j] = self.clip(ti.random(), 0.2, 0.8)
+
+    @ti.kernel
+    def erase(self):
+        center = ti.Vector([self.cursor[0], self.cursor[1]])
+        for i, j in ti.ndrange(self.res, self.res):
+            dis = (ti.Vector([i, j])/self.res-center).norm()
+            if dis < self.brush[None]:
+                self.world_old[i,j] = 0.0
+
+    def save_world(self):
+        self.world_save.copy_from(self.world_old)
+        
+
+    def load_world(self):
+        self.world_old.copy_from(self.world_save)
 
     def init(self):
         self.world_init()
@@ -199,12 +226,13 @@ if __name__ == "__main__":
 
     res = 256
     scatter = 4
+
     window = ti.ui.Window("Taichi-Lenia", (res*scatter, res*scatter))
     canvas = window.get_canvas()
     lenia = Taichi_Lenia(
         res=res, 
         scatter= scatter,
-        conv_r = 13,
+        conv_r = 20,
         time = 10,
         miu = 0.15,
         sig = 0.016,
@@ -224,39 +252,60 @@ if __name__ == "__main__":
             elif e.key == 'r':
                 lenia.init()
                 print("Reset world")
+            elif e.key == 's':
+                lenia.save_world()
+                print("Saved current world")
+                lenia.render()
+            elif e.key == 'l':
+                lenia.load_world()
+                print("Loaded saved world")
+                lenia.render()
+
+
         
         if window.is_pressed(ti.ui.LMB):
             lenia.cursor[1]=window.get_cursor_pos()[1]
             lenia.cursor[0]=window.get_cursor_pos()[0]
             lenia.draw()
             lenia.render()
+        elif window.is_pressed(ti.ui.RMB):
+            lenia.cursor[1]=window.get_cursor_pos()[1]
+            lenia.cursor[0]=window.get_cursor_pos()[0]
+            lenia.erase()
+            lenia.render()
 
         canvas.set_image(lenia.pixels)
 
 
-        window.GUI.begin("Taichi Lenia", 0.01, 0.01, 0.9, 0.2)
+        window.GUI.begin("Taichi Lenia", 0.01, 0.01, 0.6, 0.15)
         window.GUI.text(
             "LB press: draw, RB press clear"
         )
         window.GUI.text(
             "r : Reset, SPACE : pause"
         )
-        
-        lenia.conv_r = window.GUI.slider_float(
-            "Convolution kernel radius",
-            lenia.conv_r, 5, 40
+        window.GUI.text(
+            "S : save, L : load"
         )
-        lenia.time = window.GUI.slider_float(
-            "time step",
-            lenia.time, 1, 20
-        )
+        # lenia.conv_r = window.GUI.slider(
+        #     "Convolution kernel radius",
+        #     lenia.conv_r, 5, 40
+        # )
+        # lenia.time = window.GUI.slider(
+        #     "time step",
+        #     lenia.time, 1, 20
+        # )
         lenia.grow_miu[None] = window.GUI.slider_float(
             "Growth function miu",
-            lenia.grow_miu[None], 0.01, 0.50
+            lenia.grow_miu[None], 0.01, 0.30
         )
         lenia.grow_sig[None] = window.GUI.slider_float(
             "Growth function sigma",
             lenia.grow_sig[None], 0.001, 0.0300
+        )
+        lenia.brush[None] = window.GUI.slider_float(
+            "Brush radius",
+            lenia.brush[None], 0.01, 0.06
         )
         window.GUI.end()
 
