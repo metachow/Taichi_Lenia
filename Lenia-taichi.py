@@ -64,9 +64,9 @@ class Taichi_Lenia:
         self.kernel_alpha = 4.0
         self.kernel_rank = kr
 
-        self.grow_miu = ti.field(ti.f32, ())
+        self.grow_mu = ti.field(ti.f32, ())
         self.grow_sig = ti.field(ti.f32, ())
-        self.grow_miu[None] = mu
+        self.grow_mu[None] = mu
         self.grow_sig[None] = sig
 
         self.total = ti.field(ti.f32, ())
@@ -138,7 +138,7 @@ class Taichi_Lenia:
 
     @ti.func
     def growth_mapping(self, u):
-        return 2.0 * ti.exp(-(u - self.grow_miu[None])**2.0 /
+        return 2.0 * ti.exp(-(u - self.grow_mu[None])**2.0 /
                             (2.0 * (self.grow_sig[None]**2.0))) - 1.0
 
     @ti.kernel
@@ -209,8 +209,8 @@ class Taichi_Lenia:
 
         self.render()
         print(
-            "Current parameter: kernel radius:{}, dt:{}, miu:{}, sig:{}, kr:{}, kb:{}"
-            .format(self.conv_r, self.dt, self.grow_miu[None],
+            "Current parameter: kernel radius:{}, dt:{}, mu:{}, sig:{}, kr:{}, kb:{}"
+            .format(self.conv_r, self.dt, self.grow_mu[None],
                     self.grow_sig[None], self.kernel_rank, self.kernel_beta))
 
     def update(self):
@@ -286,8 +286,8 @@ if __name__ == "__main__":
         #     "time step",
         #     lenia.time, 1, 20
         # )
-        lenia.grow_miu[None] = window.GUI.slider_float("Growth function miu",
-                                                       lenia.grow_miu[None],
+        lenia.grow_mu[None] = window.GUI.slider_float("Growth function mu",
+                                                       lenia.grow_mu[None],
                                                        0.01, 0.30)
         lenia.grow_sig[None] = window.GUI.slider_float("Growth function sigma",
                                                        lenia.grow_sig[None],
