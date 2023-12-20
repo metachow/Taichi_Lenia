@@ -46,7 +46,7 @@ class Taichi_Lenia:
                  scatter,
                  conv_r,
                  time,
-                 miu,
+                 mu,
                  sig,
                  kr=1,
                  kb=ti.Vector([1])):
@@ -66,7 +66,7 @@ class Taichi_Lenia:
 
         self.grow_miu = ti.field(ti.f32, ())
         self.grow_sig = ti.field(ti.f32, ())
-        self.grow_miu[None] = miu
+        self.grow_miu[None] = mu
         self.grow_sig[None] = sig
 
         self.total = ti.field(ti.f32, ())
@@ -235,7 +235,7 @@ if __name__ == "__main__":
                          scatter=scatter,
                          conv_r=20,
                          time=10,
-                         miu=0.15,
+                         mu=0.15,
                          sig=0.016,
                          kr=1,
                          kb=ti.Vector([1]))
